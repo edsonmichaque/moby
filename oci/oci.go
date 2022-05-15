@@ -53,8 +53,8 @@ func AppendDevicePermissionsFromCgroupRules(devPermissions []specs.LinuxDeviceCg
 }
 
 const (
-	maxMinor = 1<<20 - 1
-	maxMajor = 1<<12 - 1
+	maxDeviceNumberMinor = 1<<20 - 1
+	maxDeviceNumberMajor = 1<<12 - 1
 )
 
 func VerifyDeviceCgroupRule(rule string) error {
@@ -111,27 +111,27 @@ func ParseDeviceCgroupRule(rule string) (specs.LinuxDeviceCgroup, error) {
 	}, nil
 }
 
-func verifyDeviceCgroupType(d, devNumbers, devA string) error {
-	if d != "a" && d != "b" && d != "c" {
-		return fmt.Errorf("block device %s is not allowed, only 'a', 'b' and 'c' are allowed", d)
+func verifyDeviceCgroupType(dType, dNumbers, dAccess string) error {
+	if dType != "a" && dType != "b" && dType != "c" {
+		return fmt.Errorf("block device %s is not allowed, only 'a', 'b' and 'c' are allowed", dType)
 	}
 
-	if d == "a" {
-		if _, _, err := parseDeviceCgroupNumbers(devA); err != nil {
+	if dType == "a" {
+		if _, _, err := parseDeviceCgroupNumbers(dAccess); err != nil {
 			return err
 		}
 
-		a, err := parseDeviceCgroupAccess(devA)
+		a, err := parseDeviceCgroupAccess(dAccess)
 		if err != nil {
 			return err
 		}
 
-		if devNumbers != "*:*" {
-			return fmt.Errorf("invalid device numbers: %s", devNumbers)
+		if dNumbers != "*:*" {
+			return fmt.Errorf("invalid device numbers: %s", dNumbers)
 		}
 
-		if a != (deviceAccess{read: true, write: true, mknod: true}) {
-			return fmt.Errorf("invalid device access: %s", a.String())
+		if *a != (dAccessRWM) {
+			return fmt.Errorf("invalid device access: %s for type %s", a.String(), dType)
 		}
 	}
 
@@ -151,11 +151,11 @@ func parseDeviceCgroupNumbers(numbers string) (*int64, *int64, error) {
 	if numbersParts[0] != "*" {
 		value, err := strconv.ParseInt(numbersParts[0], 10, 64)
 		if err != nil {
-			return nil, nil, newDevCgroupNumbersError(err, maxMinor)
+			return nil, nil, newDevCgroupNumbersError(err, maxDeviceNumberMinor)
 		}
 
-		if value > maxMinor || value < 0 {
-			return nil, nil, fmt.Errorf("%d is out of range, it should be between %d and %d", value, 0, maxMinor)
+		if value > maxDeviceNumberMinor || value < 0 {
+			return nil, nil, fmt.Errorf("%d is out of range, it should be between %d and %d", value, 0, maxDeviceNumberMinor)
 		}
 
 		minor = value
@@ -164,11 +164,11 @@ func parseDeviceCgroupNumbers(numbers string) (*int64, *int64, error) {
 	if numbersParts[1] != "*" {
 		value, err := strconv.ParseInt(numbersParts[1], 10, 64)
 		if err != nil {
-			return nil, nil, newDevCgroupNumbersError(err, maxMajor)
+			return nil, nil, newDevCgroupNumbersError(err, maxDeviceNumberMajor)
 		}
 
-		if value > maxMajor || value < 0 {
-			return nil, nil, fmt.Errorf("%d is out of range, it should be between %d and %d", value, 0, maxMajor)
+		if value > maxDeviceNumberMajor || value < 0 {
+			return nil, nil, fmt.Errorf("%d is out of range, it should be between %d and %d", value, 0, maxDeviceNumberMajor)
 		}
 
 		major = value
@@ -177,11 +177,57 @@ func parseDeviceCgroupNumbers(numbers string) (*int64, *int64, error) {
 	return &major, &minor, nil
 }
 
-type deviceAccess struct {
+func parseDeviceCgroupAccess(access string) (*dAccess, error) {
+	if access == "" {
+		return nil, errors.New("access should not be empty")
+	}
+
+	var deviceAccess dAccess
+
+	if len(access) > 3 {
+		return nil, errors.New("access should not have more than 3 components")
+	}
+
+	for _, c := range access {
+		if c != 'r' && c != 'w' && c != 'm' {
+			return nil, fmt.Errorf("access %c is not allowed, only 'r', 'w' and 'm' are allowed", c)
+		}
+
+		if c == 'r' {
+			if deviceAccess.read {
+				return nil, fmt.Errorf("%c access should not appear more than one", c)
+			}
+
+			deviceAccess.read = true
+		}
+
+		if c == 'w' {
+			if deviceAccess.write {
+				return nil, fmt.Errorf("%c access should not appear more than one", c)
+			}
+
+			deviceAccess.write = true
+		}
+
+		if c == 'm' {
+			if deviceAccess.mknod {
+				return nil, fmt.Errorf("%c access should not appear more than one", c)
+			}
+
+			deviceAccess.mknod = true
+		}
+	}
+
+	return &deviceAccess, nil
+}
+
+var dAccessRWM = dAccess{read: true, write: true, mknod: true}
+
+type dAccess struct {
 	read, write, mknod bool
 }
 
-func (d deviceAccess) String() string {
+func (d dAccess) String() string {
 	var b strings.Builder
 
 	if d.read {
@@ -197,50 +243,6 @@ func (d deviceAccess) String() string {
 	}
 
 	return b.String()
-}
-
-func parseDeviceCgroupAccess(access string) (deviceAccess, error) {
-	if access == "" {
-		return deviceAccess{}, errors.New("access should not be empty")
-	}
-
-	var dA deviceAccess
-
-	if len(access) > 3 {
-		return deviceAccess{}, errors.New("access should not have more than 3 components")
-	}
-
-	for _, c := range access {
-		if c != 'r' && c != 'w' && c != 'm' {
-			return deviceAccess{}, fmt.Errorf("access %c is not allowed, only 'r', 'w' and 'm' are allowed", c)
-		}
-
-		if c == 'r' {
-			if dA.read {
-				return deviceAccess{}, fmt.Errorf("%c access should not appear more than one", c)
-			}
-
-			dA.read = true
-		}
-
-		if c == 'w' {
-			if dA.write {
-				return deviceAccess{}, fmt.Errorf("%c access should not appear more than one", c)
-			}
-
-			dA.write = true
-		}
-
-		if c == 'm' {
-			if dA.mknod {
-				return deviceAccess{}, fmt.Errorf("%c access should not appear more than one", c)
-			}
-
-			dA.mknod = true
-		}
-	}
-
-	return dA, nil
 }
 
 func newDevCgroupNumbersError(err error, max int) error {
