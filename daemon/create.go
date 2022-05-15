@@ -18,6 +18,7 @@ import (
 	"github.com/docker/docker/pkg/idtools"
 	"github.com/docker/docker/pkg/system"
 	"github.com/docker/docker/runconfig"
+	"github.com/moby/moby/oci"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/selinux/go-selinux"
 	"github.com/pkg/errors"
@@ -93,6 +94,12 @@ func (daemon *Daemon) containerCreate(opts createOpts) (containertypes.CreateRes
 	err = daemon.adaptContainerSettings(opts.params.HostConfig, opts.params.AdjustCPUShares)
 	if err != nil {
 		return containertypes.CreateResponse{Warnings: warnings}, errdefs.InvalidParameter(err)
+	}
+
+	for _, rule := range opts.params.HostConfig.Resources.LinuxDeviceCgroup {
+		if err := oci.VerifyDeviceCgroupRule(rule); err != nil {
+			return containertypes.CreateResponse{Warnings: warnings}, errdefs.InvalidParameter(err)
+		}
 	}
 
 	ctr, err := daemon.create(opts)

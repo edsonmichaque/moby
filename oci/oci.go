@@ -52,7 +52,7 @@ func SetCapabilities(s *specs.Spec, caplist []string) error {
 // AppendDevicePermissionsFromCgroupRules takes rules for the devices cgroup to append to the default set
 func AppendDevicePermissionsFromCgroupRules(devPermissions []specs.LinuxDeviceCgroup, rules []string) ([]specs.LinuxDeviceCgroup, error) {
 	for _, deviceCgroupRule := range rules {
-		dPermission, err := parseDeviceCgroupRule(deviceCgroupRule)
+		dPermission, err := ParseDeviceCgroupRule(deviceCgroupRule)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +78,15 @@ const (
 	devAccessAll = "rwm"
 )
 
-func parseDeviceCgroupRule(rule string) (specs.LinuxDeviceCgroup, error) {
+func VerifyDeviceCgroupRule(rule string) error {
+	if _, err := ParseDeviceCgroupRule(rule); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ParseDeviceCgroupRule(rule string) (specs.LinuxDeviceCgroup, error) {
 	ruleParts := strings.Split(rule, " ")
 
 	if len(ruleParts) == 1 {
