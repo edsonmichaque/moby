@@ -18,17 +18,6 @@ import (
 //nolint: gosimple
 var deviceCgroupRuleRegex = regexp.MustCompile("^([acb]) ([0-9]+|\\*):([0-9]+|\\*) ([rwm]{1,3})$")
 
-const (
-	msgEmptyAccess          = "access should not be empty"
-	msgRepeatedAccess       = "%c access should not appear more than one"
-	msgInvalidAccess        = "access %c is not allowed, only 'r', 'w' and 'm' are allowed"
-	msgLongAccess           = "access should not have more than 3 components"
-	msgNumbersOutOfRange    = "%d is out of range, it should be between %d and %d"
-	msgInvalidNumbersFormat = "%s is does not have a valid format for device numbers"
-	msgInvalidDevType       = "block device %s is not allowed, only 'a', 'b' and 'c' are allowed"
-	msgInvalidRuleFormat    = "rule is not constituted of type, numbers and access"
-)
-
 // SetCapabilities sets the provided capabilities on the spec
 // All capabilities are added if privileged is true.
 func SetCapabilities(s *specs.Spec, caplist []string) error {
@@ -64,18 +53,8 @@ func AppendDevicePermissionsFromCgroupRules(devPermissions []specs.LinuxDeviceCg
 }
 
 const (
-	devTypeAll   = "a"
-	devTypeBlock = "b"
-	devTypeChar  = "c"
-
-	devNumbersAll = "*:*"
-	devNumberAll  = "*"
-	devNumbersSep = ":"
-
 	maxMinor = 1<<20 - 1
 	maxMajor = 1<<12 - 1
-
-	devAccessAll = "rwm"
 )
 
 func VerifyDeviceCgroupRule(rule string) error {
@@ -90,121 +69,112 @@ func ParseDeviceCgroupRule(rule string) (specs.LinuxDeviceCgroup, error) {
 	ruleParts := strings.Split(rule, " ")
 
 	if len(ruleParts) == 1 {
-		if rule != devTypeAll {
-			return specs.LinuxDeviceCgroup{}, fmt.Errorf(msgInvalidDevType, rule)
+		if rule != "a" {
+			return specs.LinuxDeviceCgroup{}, fmt.Errorf("block device %s is not allowed, only 'a', 'b' and 'c' are allowed", rule)
 		}
 
-		var (
-			majorAll = int64(-1)
-			minorAll = int64(-1)
-		)
+		major := int64(-1)
+		minor := int64(-1)
 
 		return specs.LinuxDeviceCgroup{
 			Allow:  true,
 			Access: "rwm",
-			Major:  &majorAll,
-			Minor:  &minorAll,
+			Major:  &major,
+			Minor:  &minor,
 		}, nil
 	}
 
 	if len(ruleParts) != 3 {
-		return specs.LinuxDeviceCgroup{}, fmt.Errorf(msgInvalidRuleFormat)
+		return specs.LinuxDeviceCgroup{}, fmt.Errorf("rule is not constituted of type, numbers and access")
 	}
 
-	var (
-		devType    = ruleParts[0]
-		devNumbers = ruleParts[1]
-		devAccess  = ruleParts[2]
-	)
+	if err := verifyDeviceCgroupType(ruleParts[0], ruleParts[1], ruleParts[2]); err != nil {
+		return specs.LinuxDeviceCgroup{}, err
+	}
 
-	dType, err := parseDeviceCgroupType(devType, devNumbers, devAccess)
+	major, minor, err := parseDeviceCgroupNumbers(ruleParts[1])
 	if err != nil {
 		return specs.LinuxDeviceCgroup{}, err
 	}
 
-	major, minor, err := parseDeviceCgroupNumbers(devNumbers)
-	if err != nil {
-		return specs.LinuxDeviceCgroup{}, err
-	}
-
-	dAccess, err := parseDeviceCgroupAccess(devAccess)
+	dAccess, err := parseDeviceCgroupAccess(ruleParts[2])
 	if err != nil {
 		return specs.LinuxDeviceCgroup{}, err
 	}
 
 	return specs.LinuxDeviceCgroup{
 		Allow:  true,
-		Type:   dType,
+		Type:   ruleParts[0],
 		Major:  major,
 		Minor:  minor,
 		Access: dAccess.String(),
 	}, nil
 }
 
-func parseDeviceCgroupType(d, devNumbers, devA string) (string, error) {
-	if d != devTypeAll && d != devTypeBlock && d != devTypeChar {
-		return "", fmt.Errorf(msgInvalidDevType, d)
+func verifyDeviceCgroupType(d, devNumbers, devA string) error {
+	if d != "a" && d != "b" && d != "c" {
+		return fmt.Errorf("block device %s is not allowed, only 'a', 'b' and 'c' are allowed", d)
 	}
 
-	if d == devTypeAll {
+	if d == "a" {
 		if _, _, err := parseDeviceCgroupNumbers(devA); err != nil {
-			return "", err
+			return err
 		}
 
 		a, err := parseDeviceCgroupAccess(devA)
 		if err != nil {
-			return "", err
+			return err
 		}
 
-		if devNumbers != devNumbersAll {
-			return "", fmt.Errorf("invalid device numbers: %s", devNumbers)
+		if devNumbers != "*:*" {
+			return fmt.Errorf("invalid device numbers: %s", devNumbers)
 		}
 
 		if a != (deviceAccess{read: true, write: true, mknod: true}) {
-			return "", fmt.Errorf("invalid device access: %s", a.String())
+			return fmt.Errorf("invalid device access: %s", a.String())
 		}
 	}
 
-	return d, nil
+	return nil
 }
 
-func parseDeviceCgroupNumbers(numbers string) (major *int64, minor *int64, err error) {
-	numbersParts := strings.Split(numbers, devNumbersSep)
+func parseDeviceCgroupNumbers(numbers string) (*int64, *int64, error) {
+	numbersParts := strings.Split(numbers, ":")
 
 	if len(numbersParts) != 2 {
-		return nil, nil, fmt.Errorf(msgInvalidNumbersFormat, numbers)
+		return nil, nil, fmt.Errorf("%s does not have a valid format for an integer", numbers)
 	}
 
-	majorPtr := int64(-1)
-	minorPtr := int64(-1)
+	major := int64(-1)
+	minor := int64(-1)
 
-	if numbersParts[0] != devNumberAll {
-		minor, err := strconv.ParseInt(numbersParts[0], 10, 64)
+	if numbersParts[0] != "*" {
+		value, err := strconv.ParseInt(numbersParts[0], 10, 64)
 		if err != nil {
 			return nil, nil, newDevCgroupNumbersError(err, maxMinor)
 		}
 
-		if minor > maxMinor || minor < 0 {
-			return nil, nil, fmt.Errorf(msgNumbersOutOfRange, minor, 0, maxMinor)
+		if value > maxMinor || value < 0 {
+			return nil, nil, fmt.Errorf("%d is out of range, it should be between %d and %d", value, 0, maxMinor)
 		}
 
-		minorPtr = minor
+		minor = value
 	}
 
-	if numbersParts[1] != devNumberAll {
-		major, err := strconv.ParseInt(numbersParts[1], 10, 64)
+	if numbersParts[1] != "*" {
+		value, err := strconv.ParseInt(numbersParts[1], 10, 64)
 		if err != nil {
 			return nil, nil, newDevCgroupNumbersError(err, maxMajor)
 		}
 
-		if major > maxMajor || major < 0 {
-			return nil, nil, fmt.Errorf(msgNumbersOutOfRange, major, 0, maxMajor)
+		if value > maxMajor || value < 0 {
+			return nil, nil, fmt.Errorf("%d is out of range, it should be between %d and %d", value, 0, maxMajor)
 		}
 
-		majorPtr = major
+		major = value
 	}
 
-	return &majorPtr, &minorPtr, nil
+	return &major, &minor, nil
 }
 
 type deviceAccess struct {
@@ -231,23 +201,23 @@ func (d deviceAccess) String() string {
 
 func parseDeviceCgroupAccess(access string) (deviceAccess, error) {
 	if access == "" {
-		return deviceAccess{}, errors.New(msgEmptyAccess)
+		return deviceAccess{}, errors.New("access should not be empty")
 	}
 
 	var dA deviceAccess
 
 	if len(access) > 3 {
-		return deviceAccess{}, errors.New(msgLongAccess)
+		return deviceAccess{}, errors.New("access should not have more than 3 components")
 	}
 
 	for _, c := range access {
 		if c != 'r' && c != 'w' && c != 'm' {
-			return deviceAccess{}, fmt.Errorf(msgInvalidAccess, c)
+			return deviceAccess{}, fmt.Errorf("access %c is not allowed, only 'r', 'w' and 'm' are allowed", c)
 		}
 
 		if c == 'r' {
 			if dA.read {
-				return deviceAccess{}, fmt.Errorf(msgInvalidAccess, c)
+				return deviceAccess{}, fmt.Errorf("%c access should not appear more than one", c)
 			}
 
 			dA.read = true
@@ -255,7 +225,7 @@ func parseDeviceCgroupAccess(access string) (deviceAccess, error) {
 
 		if c == 'w' {
 			if dA.write {
-				return deviceAccess{}, fmt.Errorf(msgInvalidAccess, c)
+				return deviceAccess{}, fmt.Errorf("%c access should not appear more than one", c)
 			}
 
 			dA.write = true
@@ -263,7 +233,7 @@ func parseDeviceCgroupAccess(access string) (deviceAccess, error) {
 
 		if c == 'm' {
 			if dA.mknod {
-				return deviceAccess{}, fmt.Errorf(msgInvalidAccess, c)
+				return deviceAccess{}, fmt.Errorf("%c access should not appear more than one", c)
 			}
 
 			dA.mknod = true
