@@ -182,7 +182,7 @@ func parseDeviceCgroupAccess(access string) (*dAccess, error) {
 		return nil, errors.New("access should not be empty")
 	}
 
-	var deviceAccess dAccess
+	var d dAccess
 
 	if len(access) > 3 {
 		return nil, errors.New("access should not have more than 3 components")
@@ -194,31 +194,31 @@ func parseDeviceCgroupAccess(access string) (*dAccess, error) {
 		}
 
 		if c == 'r' {
-			if deviceAccess.read {
+			if d.read {
 				return nil, fmt.Errorf("%c access should not appear more than one", c)
 			}
 
-			deviceAccess.read = true
+			d.read = true
 		}
 
 		if c == 'w' {
-			if deviceAccess.write {
+			if d.write {
 				return nil, fmt.Errorf("%c access should not appear more than one", c)
 			}
 
-			deviceAccess.write = true
+			d.write = true
 		}
 
 		if c == 'm' {
-			if deviceAccess.mknod {
+			if d.mknod {
 				return nil, fmt.Errorf("%c access should not appear more than one", c)
 			}
 
-			deviceAccess.mknod = true
+			d.mknod = true
 		}
 	}
 
-	return &deviceAccess, nil
+	return &d, nil
 }
 
 var dAccessRWM = dAccess{read: true, write: true, mknod: true}
