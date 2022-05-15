@@ -94,7 +94,17 @@ func ParseDeviceCgroupRule(rule string) (specs.LinuxDeviceCgroup, error) {
 			return specs.LinuxDeviceCgroup{}, fmt.Errorf(msgInvalidDevType, rule)
 		}
 
-		return specs.LinuxDeviceCgroup{Allow: true, Access: "rwm"}, nil
+		var (
+			majorAll = int64(-1)
+			minorAll = int64(-1)
+		)
+
+		return specs.LinuxDeviceCgroup{
+			Allow:  true,
+			Access: "rwm",
+			Major:  &majorAll,
+			Minor:  &minorAll,
+		}, nil
 	}
 
 	if len(ruleParts) != 3 {
@@ -165,7 +175,8 @@ func parseDeviceCgroupNumbers(numbers string) (major *int64, minor *int64, err e
 		return nil, nil, fmt.Errorf(msgInvalidNumbersFormat, numbers)
 	}
 
-	var majorPtr, minorPtr *int64
+	majorPtr := int64(-1)
+	minorPtr := int64(-1)
 
 	if numbersParts[0] != devNumberAll {
 		minor, err := strconv.ParseInt(numbersParts[0], 10, 64)
@@ -177,7 +188,7 @@ func parseDeviceCgroupNumbers(numbers string) (major *int64, minor *int64, err e
 			return nil, nil, fmt.Errorf(msgNumbersOutOfRange, minor, 0, maxMinor)
 		}
 
-		minorPtr = &minor
+		minorPtr = minor
 	}
 
 	if numbersParts[1] != devNumberAll {
@@ -190,10 +201,10 @@ func parseDeviceCgroupNumbers(numbers string) (major *int64, minor *int64, err e
 			return nil, nil, fmt.Errorf(msgNumbersOutOfRange, major, 0, maxMajor)
 		}
 
-		majorPtr = &major
+		majorPtr = major
 	}
 
-	return majorPtr, minorPtr, nil
+	return &majorPtr, &minorPtr, nil
 }
 
 type deviceAccess struct {
